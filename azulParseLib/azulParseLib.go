@@ -181,7 +181,7 @@ type pdfDoc struct {
 
 }
 
-func InitParseLib(pdfFilnam string)(info *ParsePdf, err error) {
+func InitPdfParseLib(pdfFilnam string)(info *ParsePdf, err error) {
 	pdf := ParsePdf{
 		PdfFilnam: pdfFilnam,
 		Dbg: true,
@@ -217,8 +217,10 @@ func InitParseLib(pdfFilnam string)(info *ParsePdf, err error) {
 	return &pdf, nil
 }
 
+func (pdf *ParsePdf) Save(filnam string)(err error) {
 
-
+	return nil
+}
 
 func (pdf *ParsePdf) parseTopTwoLines()(err error) {
 
@@ -248,7 +250,7 @@ func (pdf *ParsePdf) parseTopTwoLines()(err error) {
 	_, err = fmt.Sscanf(verStr, "%d.%d", &majver, &minver)
 	if err != nil {return fmt.Errorf("cannot parse pdf version: %v!",err)}
 
-	fmt.Printf("pdf version maj:min: %d:%d\n", majver, minver)
+	if pdf.Dbg {fmt.Printf("dbg: pdf version: %d.%d\n", majver, minver)}
 
 	if majver > 2 {return fmt.Errorf("invalid pdf version %d", majver)}
 
@@ -264,7 +266,7 @@ func (pdf *ParsePdf) parseTopTwoLines()(err error) {
 
 	endSl := -1
 	for i:=startSl; i<maxPos; i++ {
-		if (buf[i] == '\n') || (buf[i] == '\r'){
+		if buf[i] == '\n'{
 			endSl = i
 			break
 		}
@@ -273,11 +275,12 @@ func (pdf *ParsePdf) parseTopTwoLines()(err error) {
 	if endSl == -1 {return fmt.Errorf("no eol in second line!")}
 
 	endPSl := endSl
-	if buf[endSl+1] == '\n' {endPSl++}
+	if buf[endSl-1] == '\r' {endPSl--}
 
 	dif := endPSl - startSl
 
 	if dif > 5 && pdf.Dbg {
+		fmt.Printf("dif > 5: %d\n", dif)
 		for i:=startSl; i< endPSl; i++ {
 			fmt.Printf("[%d]:%d/%q ", i, buf[i], buf[i])
 		}
@@ -693,6 +696,7 @@ func (pdf *ParsePdf) parseXref(stPos int)(trailStartPos int, err error) {
 	if err != nil {return -1, fmt.Errorf("readLine cannot parse 2nd line objstart objnum: %v", err)}
 
 	// line 3+: get pos of each Obj
+	if pdf.Dbg {fmt.Printf("dbg -- objStart: %d objNum: %d\n", objStart, objNum)}
 	if 	pdf.ObjList == nil {
 		objlist := make([]pdfObj, (objNum + objStart))
 		pdf.ObjList = &objlist
@@ -711,6 +715,13 @@ func (pdf *ParsePdf) parseXref(stPos int)(trailStartPos int, err error) {
 		(*pdf.ObjList)[objStart + i].BufPos = objPos
 	}
 
+	if pdf.Dbg {
+		fmt.Printf("dbg: **** objlist[%d] ******\n", pdf.NumObj)
+    	for i := 0; i< pdf.NumObj; i++ {
+			obj := (*pdf.ObjList)[i]
+			fmt.Printf("%d: %d\n", i, obj.BufPos)
+		}
+	}
 	return nextPos, nil
 }
 
