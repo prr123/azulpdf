@@ -395,14 +395,14 @@ func (pdf *ParsePdf) parseTrailer(stPos int)(err error) {
 	// get trailer dict  line
 
 	txtslic, _, err = pdf.readLine(nextPos)
-//	if pdf.Dbg {fmt.Printf("dbg -- trailer dict: %s\n", string(txtslic))}
-//	fmt.Printf("dbg -- nextPos: %d, length: %d\n", nextPos, len(txtslic))
-	dblStart, dblEnd, err := pdf.parseDblBracket(nextPos, nextPos + len(txtslic)+1)
+//	if pdf.Dbg {fmt.Printf("dbg -- trailer dict[%d]: %s\n", len(txtslic), string(txtslic))}
+//	fmt.Printf("dbg -- nextPos [%d: %d] %s\n", nextPos, nextPos + len(txtslic)+1, string(buf[nextPos:nextPos + len(txtslic) + 1]))
+	dblStart, dblEnd, err := pdf.parseDblBracket(nextPos, len(txtslic))
 	if err != nil {return fmt.Errorf("parseDblBracket: %v",err)}
 //	fmt.Printf("dbg -- dblStart: %d, dblEnd: %d\n", dblStart, dblEnd)
 
 	trailerDict := buf[dblStart:dblEnd +1]
-	if pdf.Dbg {fmt.Printf("trailer dict: %s\n", string(trailerDict))}
+//	if pdf.Dbg {fmt.Printf("trailer dict: %s\n", string(trailerDict))}
 
 
 	objId, _, err := pdf.parseTrailerDict("Root",trailerDict, 1)
@@ -431,29 +431,32 @@ func (pdf *ParsePdf) parseDblBracket(pSt int, pLen int)(bst int, bend int, err e
 
 	buf := *pdf.buf
 	bst = -1
+	nestLev :=0
+
+//	fmt.Printf("dbg start dblBr -- %d %d %s\n", pSt, pSt + pLen, string(buf[pSt: pSt+pLen+1]))
 	for i:=pSt; i< pSt+pLen; i++ {
 		if buf[i] == '<' {
 			if buf[i+1] == '<' {
-				bst = i+2
-				break
-			} else {
-				return -1, -1, fmt.Errorf("no second < found!")
+				if nestLev == 0 {
+					bst = i+2
+				}
+				nestLev++
 			}
 		}
-	}
-	if bst == -1 {return -1, -1, fmt.Errorf("no << found!")}
-
-	bend = -1
-	for i:=bst; i< pSt+pLen; i++ {
 		if buf[i] == '>' {
 			if buf[i+1] == '>' {
-				bend = i-1
-				break
+				if nestLev==1 {
+					bend = i-1
+				}
+				nestLev--
 			}
 		}
 	}
-	if bend == -1 {return -1, -1, fmt.Errorf("no >> found!")}
 
+//	fmt.Printf("dbg -- %d %d %s\n", bst, bend, string(buf[bst:bend+1]))
+	if bst == -1 {return -1, -1, fmt.Errorf("no << found!")}
+	if bend == -1 {return -1, -1, fmt.Errorf("no >> found!")}
+	if nestLev != 0{return bst, -1, fmt.Errorf("nestLev: %d!", nestLev)}
 	return bst, bend, nil
 }
 
