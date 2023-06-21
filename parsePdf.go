@@ -44,7 +44,7 @@ func main() {
 	outFilnamStr := outFilNam.(string)
 log.Printf("out file: %s\n",outFilnamStr)
 
-	pdf, err := pdflib.InitPdfLib(parseFilnam)
+	pdf, err := pdflib.InitPdfParseLib(parseFilnam)
 	if err != nil {log.Fatalf("InitPdfLib: %v\n", err)}
 
 //	err = pdf.ReadPdf(parseFilnam)
