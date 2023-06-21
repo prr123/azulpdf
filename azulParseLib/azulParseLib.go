@@ -2499,29 +2499,26 @@ func (pdf *ParsePdf) readLine(stPos int)(out []byte, nextPos int, err error) {
 
 	buf := *pdf.buf
 
-	endPos := -1
 
 	maxPos := stPos + 3000
 	if len(buf) < maxPos {maxPos = len(buf)}
-//	if pdf. {fmt.Printf("\nreadLine [%d:%d]:\n%s\n***\n", stPos, maxPos, string(buf[stPos:maxPos]))}
+//	if pdf.Dbg {fmt.Printf("\nreadLine [%d:%d]:\n%s\n***\n", stPos, maxPos, string(buf[stPos:maxPos]))}
 
+	endPos := -1
+	nextPos = -1
 	for i:=stPos; i < maxPos; i++ {
-//if pdf.test	{fmt.Printf("i: %d char: %q\n",i, buf[i])}
-		if buf[i] == '\n' || buf[i] == '\r'{
+//if pdf.Dbg {fmt.Printf("i: %d char: %q\n",i, buf[i])}
+		if buf[i] == '\n' {
 			endPos = i
+			if buf[i-1] == '\r' {endPos =i-1} 
 			nextPos = i+1
-			if buf[i+1] == '\n' {nextPos++}
-
-//if pdf.test {fmt.Println("endpos: ", endPos)}
 			break
 		}
 	}
 
-	if endPos == -1 {return out, -1, fmt.Errorf("no eol found!")}
+	if endPos == -1 {endPos = maxPos}
 
 	out = buf[stPos:endPos]
-
-//if pdf.test {fmt.Printf("out:\n%s\nnext: %d\n", outstr, nextPos)}
 	return out, nextPos, nil
 }
 
