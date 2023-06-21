@@ -50,7 +50,7 @@ type ParsePdf struct {
 	buf *[]byte
 //	filSize int64
 //	filNam string
-	objSize int
+//	objSize int
 	NumObj int `yaml:"numObj"`
 	PageCount int `yaml:"pages:"`
 	InfoId int
@@ -87,6 +87,8 @@ type ParsePdf struct {
 
 type pdfObj struct {
 	BufPos int
+	EndPos int
+	objId int
 	Typ int
 	typstr string
 	dictMap map[string]dictVal
@@ -94,11 +96,7 @@ type pdfObj struct {
 	array bool
 	simple bool
 	parent int
-	start int
-	end int
-	contSt int
-	contEnd int
-	hasStream bool
+	stream bool
 	streamSt int
 	streamEnd int
 }
@@ -377,7 +375,7 @@ func (pdf *ParsePdf) findNextObj(start int)(objSt, objEnd int, err error) {
 }
 
 // method parses trailer
-func (pdf *ParsePdf) parseTrailer(stPos int)(err error) {
+func (pdf *ParsePdf) parseTrailer(stPos int, keyParse bool)(err error) {
 
 	if pdf.StartXrefPos < 1 {return fmt.Errorf("no valid startxref")}
 //	if pdf.trailerPos < 1 {return fmt.Errorf("no valid trailer")}
@@ -404,6 +402,7 @@ func (pdf *ParsePdf) parseTrailer(stPos int)(err error) {
 	trailerDict := buf[dblStart:dblEnd +1]
 //	if pdf.Dbg {fmt.Printf("trailer dict: %s\n", string(trailerDict))}
 
+	if !keyParse { return nil}
 
 	objId, _, err := pdf.parseTrailerDict("Root",trailerDict, 1)
 	if err != nil {return fmt.Errorf("parse Root Obj error: %v!", err)}
@@ -1016,12 +1015,24 @@ func (pdf *ParsePdf) ParsePdf()(err error) {
 	log.Printf("startXrefPos: %d |%s\n", xrefPos, string(buf[xrefPos: xrefPos + 4]))
 
 	trailPos, err := pdf.parseXref(xrefPos)
-	if err != nil {return fmt.Errorf("parseLast3Lines: %v", err)}
+	if err != nil {return fmt.Errorf("parseXref: %v", err)}
 
 	log.Printf("trailer start Pos: %d\n", trailPos)
 
-	err = pdf.parseTrailer(trailPos)
+	err = pdf.parseTrailer(trailPos, true)
 	if err != nil {return fmt.Errorf("parseTrailer: %v", err)}
+
+	if pdf.xrefPos > 0 {
+
+		trailPos, err := pdf.parseXref(pdf.xrefPos)
+		if err != nil {return fmt.Errorf("parseXref: %v", err)}
+
+		log.Printf("trailer start Pos: %d\n", trailPos)
+		pdf.xrefPos = 0
+
+		err = pdf.parseTrailer(trailPos, false)
+		if err != nil {return fmt.Errorf("parseTrailer: %v", err)}
+	}
 
 	firstObjSt, firstObjEnd, err := pdf.findNextObj(10)
 
@@ -2164,184 +2175,73 @@ func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
 	return ipos
 }
 */
-/*
-func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
+
+func (pdf *ParsePdf) parseObjList()(err error) {
 // method parses an object to determine dict start/end stream start/end and object type
 
+	for i:= 1; i< pdf.NumObj; i++ {
+		err = pdf.parseObj(i)
+		if err != nil {return fmt.Errorf("obj[%d] %v", err)}
+	}
+	return nil
+}
+
+func (pdf *ParsePdf) parseObj(objIdx int)(err error) {
+
 	buf := *pdf.buf
 
-	valst := -1
-	valend := -1
-	ipos :=-1
-	xend := -1
+	obj := (*pdf.ObjList)[objIdx]
 
-	err = pdf.parseObjHead(objId)
-	if err != nil {return "", fmt.Errorf("parseObjHead: %v", err)}
-//	if buf[obj.contSt] == '\r' {obj.contSt +=2} else {obj.contSt +=1}
+	stPos := obj.BufPos
+	txtslic, _, err := pdf.readLine(stPos)
+	if err != nil { return fmt.Errorf("readLine: %v", err)}
 
-	obj := (*pdf.objList)[objId]
-
-	if obj.start < 0 {return "", nil}
-
-	// exception for info
-	if objId+1 == pdf.infoId {obj.typstr = "Info"}
+	objId, err := pdf.parseObjHead(txtslic)
+	if err != nil {return fmt.Errorf("parseObjHead: %v", err)}
+	obj.objId = objId
 
 	// find endobj
-	objByt := buf[obj.contSt:obj.end]
-	xres := bytes.Index(objByt, []byte("endobj"))
-	if xres == -1 {return "", fmt.Errorf("no endobj for obj %d!", objId)}
-
-	endobj := obj.contSt + xres
-	obj.contEnd = endobj
-
+	idx := bytes.Index(buf[stPos:], []byte("endobj"))
+	if idx == -1 {return fmt.Errorf("no endobj found")}
+	endPos := stPos + idx
+	obj.EndPos = endPos
 	// find stream
-	objByt = buf[obj.contSt:endobj]
-	xres = bytes.Index(objByt, []byte("stream"))
-	if xres > -1 {
-		obj.contEnd = obj.contSt + xres
-		obj.streamSt = obj.contSt + xres + 7
-		if buf[obj.streamSt] == '\n' {obj.streamSt++}
-	}
-
-	objByt = buf[obj.contSt:obj.contEnd]
-
-//fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
-
-	obj.simple = false
-
-	// is dictionary
-	xres = bytes.Index(objByt, []byte("<<"))
-
-	if xres <0 {
-		obj.dict = false
-		goto endParse
-	}
-
-	obj.dict = true
-
-	xend = bytes.LastIndex(objByt, []byte(">>"))
-	if xend == -1 {
-		outstr += "no closing brackets in dict of obj"
-		return outstr + "\n", fmt.Errorf(outstr)
-	}
-
-	obj.contEnd = obj.contSt + xend +2
-
-//fmt.Printf("obj %d dict after (<<>>) [%d:%d]: %s\n", objId, obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
-
-// todo rep
-	// check type
-	ipos = bytes.Index(objByt, []byte("/Type"))
-	if ipos == -1 {goto endParse}
-
-	// has type
-	for i:= ipos+5; i< len(objByt); i++ {
-		if objByt[i] == '/' {
-			valst = i
-			break
-		}
-	}
-	if valst == -1 {return "", fmt.Errorf("no name for /type in obj %d found!", objId)}
-
-//fmt.Printf("\nafter /type: %s valst %d: %s\n", string(objByt[ipos:ipos+5]), valst, string(objByt[valst:20]))
-
-	for i:= valst+1; i< len(objByt); i++ {
-		switch objByt[i] {
-		case '/', '\r', '\n', ' ':
-			valend = i
-		default:
-		}
-		if valend> -1 {break}
-	}
-	if valend == -1 {return "", fmt.Errorf("no eol for val of /type in obj %d found!", objId)}
-
-	obj.typstr = string(objByt[(valst +1):valend])
-//fmt.Printf("obj: %d valstr [%d:%d]: %s\n", objId, valst, valend, obj.typstr)
-	switch obj.typstr {
-	case "Font":
-		(*pdf.fontIds)[pdf.fCount] = objId
-		pdf.fCount++
-	case "ExtGState":
-		(*pdf.gStateIds)[pdf.gCount] = objId
-		pdf.gCount++
-	case "XObject":
-		(*pdf.xObjIds)[pdf.xObjCount] = objId
-		pdf.xObjCount++
-	}
-
-	endParse:
-
-	(*pdf.objList)[objId] = obj
-
-	//getstream
-	outstr = string(objByt)
-	if obj.streamSt < 0 {
-		outstr += "\nno keyword stream"
-		return outstr + "\n", nil
-	}
-
-	outstr += "has stream\n"
-
-	xres = bytes.Index(buf[obj.streamSt:obj.end], []byte("endstream"))
-
-	if xres == -1 {
-		outstr += " cannot find \"endstream\"\n"
-		return outstr + "\n", fmt.Errorf(outstr)
-	}
-
-	obj.streamEnd = obj.streamSt + xres -1
-	if buf[obj.streamEnd -1] == '\r' {obj.streamEnd--}
-
-	(*pdf.objList)[objId] = obj
-	return outstr, nil
-}
-*/
-/*
-func (pdf *InfoPdf) parseObjHead(objId int) (err error){
-
-
-	buf := *pdf.buf
-
-	if objId > pdf.numObj {return fmt.Errorf("invalid objId %d", objId)}
-	obj := (*pdf.objList)[objId]
-
-	obj.streamSt = -1
-	obj.streamEnd = -1
-	obj.contSt = -1
-	obj.contEnd = -1
-	if obj.start < 0 {
-		(*pdf.objList)[objId]= obj
+	idxStream := bytes.Index(buf[stPos: endPos], []byte("stream"))
+	if idxStream == -1 {
+		obj.stream = false
+		(*pdf.ObjList)[objIdx] = obj
 		return nil
 	}
 
-	linEnd := -1
+	streamSt := stPos + idxStream
+	obj.streamSt = streamSt
 
-	if obj.start == 0 {return fmt.Errorf("objId: %d obj.start value is invalid!", objId)}
+	idx = bytes.Index(buf[streamSt: endPos], []byte("endstream"))
+	if idx == -1 {
+		obj.streamEnd = -1
+		(*pdf.ObjList)[objIdx] = obj
+		return fmt.Errorf("no streamend")
+	 }
 
-	for i:= obj.start; i< obj.start + 10; i++ {
-		if buf[i] == '\n' {
-			linEnd = i
-			break
-		}
-	}
-	if linEnd == -1 {return fmt.Errorf("no eol found!")}
+	obj.streamEnd = obj.streamSt + idx
+	obj.stream = true
 
-	obj.contSt = linEnd+1
-
-	hdStr := string(buf[obj.start:linEnd])
-
-	id:=0
-	ref:=0
-	_, err = fmt.Sscanf(hdStr,"%d %d obj", &id, &ref)
-	if err != nil {return fmt.Errorf("obj %d: canno parse headline: %v!", err)}
-
-	if id!= objId {return fmt.Errorf("objId %d does not match id %d in headline!", objId, id)}
-
-	(*pdf.objList)[objId]= obj
-
+	(*pdf.ObjList)[objIdx] = obj
 	return nil
 }
-*/
+
+
+func (pdf *ParsePdf) parseObjHead(txt []byte) (objId int, err error){
+
+	val := -1
+	txtStr := string(txt)
+	_, err = fmt.Sscanf(txtStr, " %d %d R", &objId, &val)
+	if err != nil {return -1, fmt.Errorf("Scan: %v", err)}
+	if val != 0 {return -1, fmt.Errorf("objhead val != 0: %d!", val)}
+
+	return objId, nil
+}
+
 /*
 func (pdf *InfoPdf) PrintPdf() {
 
