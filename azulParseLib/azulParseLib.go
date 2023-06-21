@@ -53,10 +53,10 @@ type ParsePdf struct {
 	objSize int
 	NumObj int `yaml:"numObj"`
 	PageCount int `yaml:"pages:"`
-//	infoId int
-	rootId int
-	pagesId int
-//	xrefPos int
+	InfoId int
+	RootId int
+	PagesId int
+	xrefPos int
 	StartXrefPos int `yaml:"startxref"`
 //	trailerPos int
 //	xrefPos2 int
@@ -375,41 +375,57 @@ func (pdf *ParsePdf) findNextObj(start int)(objSt, objEnd int, err error) {
 
 	return objSt, objEnd, nil
 }
-/*
+
 // method parses trailer
 func (pdf *ParsePdf) parseTrailer(stPos int)(err error) {
 
-
 	if pdf.StartXrefPos < 1 {return fmt.Errorf("no valid startxref")}
 //	if pdf.trailerPos < 1 {return fmt.Errorf("no valid trailer")}
-	if stPos <0 {return fmt.Errorf("not a vaible stPos")}
+
+//	if stPos < pdf.StartXrefPos {return fmt.Errorf("not a viable stPos")}
 
 	buf := *pdf.buf
-	// find trailer position
-	tidx:= bytes.Index(buf[pdf.StartXrefPos -100: pdf.StartXrefPos], []byte("trailer"))
+	// find trailer keyword in first line
+	txtslic, nextPos, err := pdf.readLine(stPos)
+	if err != nil {return fmt.Errorf("trailer first line no eol")}
+
+	tidx:= bytes.Index(txtslic, []byte("trailer"))
 	if tidx == -1 {return fmt.Errorf("key word trailer not found!")}
 
-	trailerPos := pdf.StartXrefPos-100 + tidx
+	// get trailer dict  line
 
-	dblStart, dblEnd, err := pdf.parseDblBracket(trailerPos + 7, 100)
-//	fmt.Printf("trailer: %s\n", string(buf[trailStart:trailEnd]))
+	txtslic, _, err = pdf.readLine(nextPos)
+//	if pdf.Dbg {fmt.Printf("dbg -- trailer dict: %s\n", string(txtslic))}
+//	fmt.Printf("dbg -- nextPos: %d, length: %d\n", nextPos, len(txtslic))
+	dblStart, dblEnd, err := pdf.parseDblBracket(nextPos, nextPos + len(txtslic)+1)
+	if err != nil {return fmt.Errorf("parseDblBracket: %v",err)}
+//	fmt.Printf("dbg -- dblStart: %d, dblEnd: %d\n", dblStart, dblEnd)
 
-	objId, _, err := pdf.parseTrailObjRef("Root",dblStart, dblEnd, 1)
+	trailerDict := buf[dblStart:dblEnd +1]
+	if pdf.Dbg {fmt.Printf("trailer dict: %s\n", string(trailerDict))}
+
+
+	objId, _, err := pdf.parseTrailerDict("Root",trailerDict, 1)
 	if err != nil {return fmt.Errorf("parse Root Obj error: %v!", err)}
-	pdf.rootId = objId
-//fmt.Printf("Root: %d\n", objId)
+	pdf.RootId = objId
 
-	objId, _, err = pdf.parseTrailObjRef("Info",dblStart, dblEnd, 1)
-	if err != nil {return fmt.Errorf("parse Info Obj error: %v!", err)}
-	pdf.infoId = objId
+	objId, _, err = pdf.parseTrailerDict("Info",trailerDict, 1)
+	if err != nil {return fmt.Errorf("parse Info Obj: %v!", err)}
+	pdf.InfoId = objId
 
-	objId, _, err = pdf.parseTrailObjRef("Size",dblStart, dblEnd, 2)
-	if err != nil {return fmt.Errorf("parse Size Obj error: %v!", err)}
-	pdf.numObj = objId
+	numObj, _, err := pdf.parseTrailerDict("Size",trailerDict, 2)
+	if err != nil {return fmt.Errorf("parse Size Obj: %v!", err)}
+	if pdf.NumObj != numObj { return fmt.Errorf("pdf.NumObj %d != numObj %d\n", pdf.NumObj, numObj)}
 
+	if pdf.xrefPos < 0 {
+		xrefpos, _, err := pdf.parseTrailerDict("Prev", trailerDict, 2)
+		if err != nil {return fmt.Errorf("parse Prev Obj: %v!", err)}
+		pdf.xrefPos = xrefpos
+	}
 	return nil
 }
-*/
+
+
 // function finds start and end of double brackets
 func (pdf *ParsePdf) parseDblBracket(pSt int, pLen int)(bst int, bend int, err error) {
 
@@ -433,8 +449,6 @@ func (pdf *ParsePdf) parseDblBracket(pSt int, pLen int)(bst int, bend int, err e
 			if buf[i+1] == '>' {
 				bend = i-1
 				break
-			} else {
-				return -1, -1, fmt.Errorf("no second > found!")
 			}
 		}
 	}
@@ -443,11 +457,10 @@ func (pdf *ParsePdf) parseDblBracket(pSt int, pLen int)(bst int, bend int, err e
 	return bst, bend, nil
 }
 
-/*
-func (pdf *InfoPdf) parseTrailObjRef(key string, bst int, bend int, Type int)(objId int, val int, err error) {
+
+func (pdf *ParsePdf) parseTrailerDict(key string, dict []byte, Type int)(objId int, val int, err error) {
 
 	//find key
-	buf := *pdf.buf
 	keyByt := []byte("/" + key)
 
 
@@ -455,25 +468,26 @@ func (pdf *InfoPdf) parseTrailObjRef(key string, bst int, bend int, Type int)(ob
 
 //fmt.Printf("key: %s\nstr [%d:%d]: %s\n", string(keyByt), Start, linEnd, string(buf[Start:(Start + 40)]))
 
-	keyIdx := bytes.Index(buf[bst: bend], keyByt)
+	keyIdx := bytes.Index(dict, keyByt)
 
 	if keyIdx == -1 {return -1, -1, fmt.Errorf("cannot find keyword %s", key)}
 
 	valSt:= keyIdx+len(keyByt)
-	rootEnd := bend
-	for i:=valSt; i< bend; i++ {
-		switch buf[i] {
-		case '/','\n','\r':
+	rootEnd := -1
+	for i:=valSt; i< len(dict); i++ {
+		switch dict[i] {
+		case '/','\n','\r','>':
 			rootEnd = i
-			break
 		default:
 		}
+		if rootEnd > 0 {break}
 	}
-//	if rootEnd == -1 {return -1, -1, fmt.Errorf("cannot find end delimiter after key %s", key)}
+	if rootEnd == -1 {rootEnd = len(dict)}
+//{return -1, -1, fmt.Errorf("cannot find end delimiter after key %s", key)}
 
-	keyObjStr := string(buf[valSt:rootEnd])
+	keyObjStr := string(dict[valSt:rootEnd])
 
-//fmt.Printf("%s: %s\n", key, keyObjStr)
+fmt.Printf("dbg -- parse Trailer: Key %s: value: %s\n", key, keyObjStr)
 	val = -1
 
 	switch Type {
@@ -489,6 +503,7 @@ func (pdf *InfoPdf) parseTrailObjRef(key string, bst int, bend int, Type int)(ob
 	return objId, val, nil
 }
 
+/*
 func (pdf *InfoPdf) parseTrailCont(linStr string)(outstr string, err error) {
 
 	keyStr := string(linStr[1:5])
@@ -694,7 +709,8 @@ func (pdf *ParsePdf) parseXref(stPos int)(trailStartPos int, err error) {
 
 	_, err = fmt.Sscanf(string(txtslic), "%d %d", &objStart, &objNum)
 	if err != nil {return -1, fmt.Errorf("readLine cannot parse 2nd line objstart objnum: %v", err)}
-
+	pdf.xrefPos = 1
+	if objStart > 0 {pdf.xrefPos =-1}
 	// line 3+: get pos of each Obj
 	if pdf.Dbg {fmt.Printf("dbg -- objStart: %d objNum: %d\n", objStart, objNum)}
 	if 	pdf.ObjList == nil {
@@ -999,8 +1015,10 @@ func (pdf *ParsePdf) ParsePdf()(err error) {
 	trailPos, err := pdf.parseXref(xrefPos)
 	if err != nil {return fmt.Errorf("parseLast3Lines: %v", err)}
 
-	log.Printf("trailPos: %d\n", trailPos)
-//	err = pdf.parseTrailer(trailPos)
+	log.Printf("trailer start Pos: %d\n", trailPos)
+
+	err = pdf.parseTrailer(trailPos)
+	if err != nil {return fmt.Errorf("parseTrailer: %v", err)}
 
 	firstObjSt, firstObjEnd, err := pdf.findNextObj(10)
 
