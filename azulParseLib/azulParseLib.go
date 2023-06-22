@@ -89,7 +89,7 @@ type pdfObj struct {
 	BufPos int
 	EndPos int
 	objId int
-	Typ int
+	objTyp int
 	typstr string
 	dictMap map[string]dictVal
 	dict bool
@@ -703,7 +703,7 @@ func (pdf *ParsePdf) parseXref(stPos int)(trailStartPos int, err error) {
 	if err != nil {return -1, fmt.Errorf("readLine for xref")}
 
 	idx := bytes.Index(txtslic, []byte("xref"))
-	if idx == -1 {return -1, fmt.Errorf("readLine cannot parse \"xref\"")}
+	if idx == -1 {return -1, fmt.Errorf("readLine cannot parse \"xref\": %s",string(txtslic))}
 
 	// line 2: get first Obj and number of objects
 	txtslic, nextPos, err = pdf.readLine(nextPos)
@@ -743,6 +743,16 @@ func (pdf *ParsePdf) parseXref(stPos int)(trailStartPos int, err error) {
 	return nextPos, nil
 }
 
+func (pdf *ParsePdf) PrintObjList (){
+
+	fmt.Printf("dbg: **** objlist[%d] ******\n", pdf.NumObj)
+	fmt.Printf("obj start end id  objType\n")
+    for i := 0; i< pdf.NumObj; i++ {
+		obj := (*pdf.ObjList)[i]
+		fmt.Printf("%d: %d %d %d %d %t %d %d\n", i, obj.BufPos, obj.EndPos, obj.objId, obj.objTyp, obj.stream, obj.streamSt, obj.streamEnd)
+	}
+
+}
 /*
 func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err error) {
 
@@ -815,147 +825,6 @@ fmt.Println("***** end streamstr")
 	return outstr, nil
 }
 
-
-func (pdf *InfoPdf) DecodePdf()(err error) {
-
-	var outstr string
-
-	buf := make([]byte,pdf.filSize)
-
-	_, err = (pdf.fil).Read(buf)
-	if err != nil {return fmt.Errorf("error Read: %v", err)}
-
-	pdf.buf = &buf
-
-	//read top two lines
-	txtslic, nextPos, err := pdf.readLine(0)
-	if err != nil {
-		txtslic = fmt.Sprintf("// read top line: %v", err)
-		return fmt.Errorf(txtslic)
-	}
-	outstr = txtslic + "\n"
-
-	txtslic, nextPos, err = pdf.readLine(nextPos)
-	if err != nil {
-		txtslic = fmt.Sprintf("// read second top line: %v", err)
-		return fmt.Errorf(txtslic)
-	}
-
-	// read last three lines
-
-	bufLen := len(buf)
-
-	ltStart := bufLen - 30
-	sByt := []byte("startxref")
-
-	ires := bytes.Index(buf[ltStart:], sByt)
-	if ires < 0 {
-		txtslic = "cannot find \"startxref\"!"
-		return fmt.Errorf(txtslic)
-	}
-
-	ltStart += ires
-	pdf.startXrefPos = ltStart
-//	fmt.Printf("ires %d\n%s\n", ires, string(buf[ltStart:]))
-
-	txtslic, nextPos, err = pdf.readLine(ltStart)
-	if err != nil {
-		txtslic = fmt.Sprintf("// read third last line: %v", err)
-		return fmt.Errorf(txtslic)
-	}
-	outstr += txtslic + "\n"
-
-//fmt.Printf("second last line!!\n%s\n", string(buf[nextPos:]))
-	txtslic, nextPos, err = pdf.readLine(nextPos)
-	if err != nil {
-		txtslic = fmt.Sprintf("// read second last line: %v", err)
-		return fmt.Errorf(txtslic)
-	}
-
-	xref := 0
-	_, err = fmt.Sscanf(txtslic, "%d", &xref)
-	if err != nil {
-		errconvStr := fmt.Sprintf("could not convert %s into xref: %v", txtslic, err)
-		return fmt.Errorf(errconvStr)
-	}
-	pdf.xrefPos = xref
-
-//fmt.Printf("xref: %d\n", xref)
-
-	// last line
-	txtslic = string(buf[nextPos:])
-
-
-	// trailer
-	tStart := ltStart - 200
-
-	tres := bytes.Index(buf[tStart:ltStart], []byte("trailer"))
-	if tres < 0 {
-		txtslic = "cannot find \"trailer\"!"
-		return fmt.Errorf(txtslic)
-	}
-	tStart += tres
-	pdf.trailerPos = tStart
-
-	txtslic, nextPos, err = pdf.readLine(tStart)
-	if err != nil {
-		txtslic = fmt.Sprintf("// read line with \"trailer\": %v", err)
-		return fmt.Errorf(txtslic)
-	}
-
-	err = pdf.parseTrailer()
-	if err != nil {
-		txtslic = fmt.Sprintf("parseTrailor: %v", err)
-		return fmt.Errorf(txtslic)
-	}
-
-	// trailer content
-
-	xByt := []byte("xref")
-
-	xres := bytes.Index(buf[pdf.xrefPos:pdf.xrefPos+7], xByt)
-	if xres < 0 {
-		txtslic = "cannot find \"xref\"!"
-		return fmt.Errorf(txtslic)
-	}
-
-//fmt.Printf("xres: %d\n", xres)
-
-	txtslic, nextPos, err = pdf.readLine(pdf.xrefPos)
-	if err != nil {
-		txtslic = fmt.Sprintf("// read line with \"xref\": %v", err)
-		return fmt.Errorf(txtslic)
-	}
-
-	// parse  Xref
-	err = pdf.parseXref()
-	if err != nil {return fmt.Errorf("parseXref: %v", err)}
-
-	//list each object
-
-	objList := *pdf.objList
-	for i:=0; i< len(objList); i++ {
-		_, err := pdf.decodeObjStr(i)
-		if err != nil {
-			txtslic = fmt.Sprintf("getObjStr ObjId %d: %v", i, err)
-			return fmt.Errorf(txtslic)
-		}
-		
-	}
-
-fmt.Println("\n*** parse Pdf Tree ***")
-	// create pdf dom tree
-	err = pdf.parseRoot()
-	if err != nil {return fmt.Errorf("parseRoot: %v", err)}
-	fmt.Printf("** parsed Root successfully **\n")
-
-	err = pdf.parsePages()
-	if err != nil {return fmt.Errorf("parsePages: %v", err)}
-
-	fmt.Printf("** parsed Pages successfully **\n")
-
-	return nil
-}
 */
 
 
@@ -996,7 +865,7 @@ fmt.Println("\n*** parse Pdf Tree ***")
 	log.Printf("read pdf file\n")/
 */
 
-func (pdf *ParsePdf) ParsePdf()(err error) {
+func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 
 	buf:= *pdf.buf
 	err = pdf.parseTopTwoLines()
@@ -1035,64 +904,34 @@ func (pdf *ParsePdf) ParsePdf()(err error) {
 	}
 
 	firstObjSt, firstObjEnd, err := pdf.findNextObj(10)
+	if err != nil {return fmt.Errorf("findNextObj: %v", err)}
 
 	log.Printf("first obj[%d:%d]\n",firstObjSt, firstObjEnd)
 
 	dblStart, dblEnd, err := pdf.parseDblBracket(firstObjSt, firstObjEnd - firstObjSt)
+	if err != nil {return fmt.Errorf("findDblBracket: %v", err)}
 
 	log.Printf("bracket[%d:%d]: %s\n", dblStart, dblEnd,string(buf[dblStart:dblEnd+1]))
+
+	err = pdf.parseObjList()
+	if err != nil {return fmt.Errorf("parseObjList: %v", err)}
+
+	pdf.PrintObjList()
+
+	// parse content
+
+
 	return nil
 }
 
-/*
-func (pdf *InfoPdf) readObjList()(rdobjList *[]pdfObj, err error) {
+// method that parses a dictionary
+func (pdf *ParsePdf) parseDict(dict []byte)(dictMap map[string]string, err error) {
 
-	var obj pdfObj
-	var objList []pdfObj
-
-	buf := *pdf.buf
-
-	objSt:= pdf.objStart
-
-	for i:=0;i<pdf.numObj; i++ {
-		obj.start = objSt
-
-//		if objIdx == -1 {return nil, fmt.Errorf("cannot find \"obj\" for obj %d of %d!", i, pdf.numObj)}
-
-		txtslic, nextPos, err := pdf.readLine(objSt)
-		if err != nil {return nil, fmt.Errorf("readLine error for obj %d: %v", i, err)}
-		if len(txtslic) < 2 {
-			objSt = nextPos
-			txtslic, nextPos, err = pdf.readLine(objSt)
-		}
-
-		objIdx := bytes.Index(buf[objSt: objSt+30], []byte("xref"))
-		if objIdx > -1 {break}
-
-//		objIdx2 := bytes.Index(buf[objSt: objSt+30], []byte("obj")
-//		if objIdx == -1 {continue}
-
-		objId:= -1
-		fmt.Sscanf(txtslic,"%d 0 obj", &objId)
-		if objId == -1 {return nil, fmt.Errorf("obj %d of %d no obj ref in \"%s\" found!", i, pdf.numObj, txtslic)}
-
-		idx := bytes.Index(buf[objSt:pdf.xrefPos],[]byte("endobj"))
-		if idx == -1 {return nil, fmt.Errorf("no endobj in obj %d!",i+1)}
-
-		txtslic, nextPos, err = pdf.readLine(objSt +idx + 6)
-		if err != nil {return nil, fmt.Errorf("readLine \"endobj\" for obj %d: %v", i, err)}
-
-		obj.bufPos = nextPos
-		obj.end = objSt + idx + 6
-		objList = append(objList, obj)
-	}
-
-//fmt.Printf("objs: %d\n",len(objList) )
-
-	return &objList, nil
+	return dictMap, nil
 }
 
 
+/*
 func (pdf *InfoPdf) parseObjLin(linSl []byte, istate int )(newstate int, err error) {
 
 	var pdfobj pdfObj
@@ -1420,6 +1259,7 @@ func (pdf *InfoPdf) parsePages()(err error) {
 	return nil
 }
 */
+
 /*
 func (pdf *InfoPdf) parseResources(obj pdfObj)(resList *resourceList, err error) {
 
@@ -2056,51 +1896,9 @@ func (pdf *InfoPdf) parseName(keyword string, objByt []byte)(outstr string, err 
 	return outstr, nil
 }
 */
-/*
-func (pdf *InfoPdf) parseDict(keyword string, objByt []byte)(dict *[]byte, err error) {
-
-	var nestSt, nestEnd [10]int
-
-	keyByt := []byte(keyword)
-	buf := *pdf.buf
-
-	idx := bytes.Index(objByt, keyByt)
-	if idx == -1 {return nil, fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
-
-	valst := idx+len(keyByt)
-	valByt := objByt[valst:]
-
-	objId:=0
-	ref :=0
-	_, err = fmt.Sscanf(string(objByt[valst: valst+10])," %d %d R", &objId, &ref)
-	if err == nil {
-fmt.Printf("%s found ind obj ref: %d\n", keyword, objId)
-		obj := (*pdf.objList)[objId]
-
-		objDictByt := buf[obj.contSt:obj.contEnd]
-		return &objDictByt, nil
-	}
-
-	nestlev := -1
-	for i:= idx + len(keyByt); i< len(valByt) -1; i++ {
-		if valByt[i] == '<' && valByt[i+1] == '<' {
-			nestlev++
-			nestSt[nestlev] = i
-			if nestlev > 10 {return nil, fmt.Errorf("nesting level exceeds 10!")}
-		}
-		if valByt[i] == '>' && valByt[i+1] == '>' {
-			if nestlev < 1 {return nil, fmt.Errorf("nestlev is less than zero!")}
-			nestlev--
-			nestEnd[nestlev] = i
-			break
-		}
-	}
 
 
-	dictByt := valByt[nestSt[0]:nestEnd[0]]
-	return &dictByt, nil
-}
-*/
+
 /*
 func (pdf *InfoPdf) parseObjRef(keyword string, objByt []byte) (objId int, err error) {
 // function parses ValByt to find object reference
@@ -2181,7 +1979,7 @@ func (pdf *ParsePdf) parseObjList()(err error) {
 
 	for i:= 1; i< pdf.NumObj; i++ {
 		err = pdf.parseObj(i)
-		if err != nil {return fmt.Errorf("obj[%d] %v", err)}
+		if err != nil {return fmt.Errorf("obj[%d] %v",i, err)}
 	}
 	return nil
 }
@@ -2191,10 +1989,13 @@ func (pdf *ParsePdf) parseObj(objIdx int)(err error) {
 	buf := *pdf.buf
 
 	obj := (*pdf.ObjList)[objIdx]
-
 	stPos := obj.BufPos
+//fmt.Printf("***Obj: %d: %d *****\n", objIdx, stPos)
+
 	txtslic, _, err := pdf.readLine(stPos)
 	if err != nil { return fmt.Errorf("readLine: %v", err)}
+//fmt.Printf("dbg next-- obj[%d]: st %d len %d\n", objIdx, stPos, len(txtslic))
+//fmt.Printf("dbg next-- \"%s\"\n", string(txtslic[:8]))
 
 	objId, err := pdf.parseObjHead(txtslic)
 	if err != nil {return fmt.Errorf("parseObjHead: %v", err)}
@@ -2235,12 +2036,111 @@ func (pdf *ParsePdf) parseObjHead(txt []byte) (objId int, err error){
 
 	val := -1
 	txtStr := string(txt)
-	_, err = fmt.Sscanf(txtStr, " %d %d R", &objId, &val)
+	_, err = fmt.Sscanf(txtStr, "%d %d obj", &objId, &val)
 	if err != nil {return -1, fmt.Errorf("Scan: %v", err)}
 	if val != 0 {return -1, fmt.Errorf("objhead val != 0: %d!", val)}
 
 	return objId, nil
 }
+
+
+//rr
+
+func (pdf *ParsePdf) readLine(stPos int)(out []byte, nextPos int, err error) {
+
+	buf := *pdf.buf
+
+
+	maxPos := stPos + 3000
+	if len(buf) < maxPos {maxPos = len(buf)}
+//	if pdf.Dbg {fmt.Printf("\nreadLine [%d:%d]:\n%s\n***\n", stPos, maxPos, string(buf[stPos:maxPos]))}
+
+	endPos := -1
+	nextPos = -1
+	for i:=stPos; i < maxPos; i++ {
+//if pdf.Dbg {fmt.Printf("i: %d char: %q\n",i, buf[i])}
+		if buf[i] == '\r' {
+			endPos = i
+			nextPos = i+1
+			if buf[i+1] == '\n' {nextPos++}
+			break
+		}
+	}
+
+	if endPos == -1 {endPos = maxPos}
+
+	out = buf[stPos:endPos]
+	return out, nextPos, nil
+}
+
+
+func getObjTypStr(ityp int)(s string) {
+	switch ityp {
+		case 1:
+			s = "Title"
+		case 2:
+			s = "Catalog"
+		case 3:
+			s = "Pages"
+		case 4:
+			s = "Page"
+		case 5:
+			s = "Font"
+		case 6:
+			s = "Font Desc"
+		case 7:
+			s = "Data"
+		case 8:
+			s= "ca"
+		default:
+			s= "unknown"
+	}
+	return s
+}
+
+/*
+func (pdf *InfoPdf) PrintPage (iPage int) {
+		pgobj := (*pdf.pageList)[iPage]
+		fmt.Printf("****************** Page %d *********************\n", iPage + 1)
+		fmt.Printf("Page Number:     %d\n", pgobj.pageNum)
+		fmt.Printf("Contents Obj Id: %d\n", pgobj.contentId)
+		fmt.Printf("Media Box: ")
+		if pgobj.mediabox == nil {
+			fmt.Printf("no\n")
+		} else {
+			mbox := pgobj.mediabox
+			for i:=0; i< 4; i++ {fmt.Printf(" %.1f", mbox[i])}
+			fmt.Printf("\n")
+		}
+		fmt.Printf("Resources:\n")
+		if pgobj.fonts == nil {
+			fmt.Println("-- no Fonts")
+		} else {
+			fmt.Println("-- Font Ids:")
+			for i:=0; i< len(*pgobj.fonts); i++ {
+				fmt.Printf("   %s %d\n", (*pgobj.fonts)[i].Nam, (*pgobj.fonts)[i].Id)
+			}
+		}
+		if pgobj.gStates == nil {
+			fmt.Println("-- no ExtGstates")
+		} else {
+			fmt.Println("-- ExtGstate Ids:")
+			for i:=0; i< len(*pgobj.gStates); i++ {
+				fmt.Printf("   %s %d\n", (*pgobj.gStates)[i].Nam, (*pgobj.gStates)[i].Id)
+			}
+		}
+		if pgobj.xObjs == nil {
+			fmt.Println("-- no XObjects")
+		} else {
+			fmt.Println("-- XObject Ids:")
+			for i:=0; i< len(*pgobj.xObjs); i++ {
+				fmt.Printf("   %s %d\n", (*pgobj.xObjs)[i].Nam, (*pgobj.xObjs)[i].Id)
+			}
+		}
+		fmt.Println("**********************************************")
+
+}
+*/
 
 /*
 func (pdf *InfoPdf) PrintPdf() {
@@ -2351,469 +2251,5 @@ func (pdf *InfoPdf) PrintPdf() {
 	}
 
 	return
-}
-*/
-/*
-func (pdf *InfoPdf) PrintPage (iPage int) {
-		pgobj := (*pdf.pageList)[iPage]
-		fmt.Printf("****************** Page %d *********************\n", iPage + 1)
-		fmt.Printf("Page Number:     %d\n", pgobj.pageNum)
-		fmt.Printf("Contents Obj Id: %d\n", pgobj.contentId)
-		fmt.Printf("Media Box: ")
-		if pgobj.mediabox == nil {
-			fmt.Printf("no\n")
-		} else {
-			mbox := pgobj.mediabox
-			for i:=0; i< 4; i++ {fmt.Printf(" %.1f", mbox[i])}
-			fmt.Printf("\n")
-		}
-		fmt.Printf("Resources:\n")
-		if pgobj.fonts == nil {
-			fmt.Println("-- no Fonts")
-		} else {
-			fmt.Println("-- Font Ids:")
-			for i:=0; i< len(*pgobj.fonts); i++ {
-				fmt.Printf("   %s %d\n", (*pgobj.fonts)[i].Nam, (*pgobj.fonts)[i].Id)
-			}
-		}
-		if pgobj.gStates == nil {
-			fmt.Println("-- no ExtGstates")
-		} else {
-			fmt.Println("-- ExtGstate Ids:")
-			for i:=0; i< len(*pgobj.gStates); i++ {
-				fmt.Printf("   %s %d\n", (*pgobj.gStates)[i].Nam, (*pgobj.gStates)[i].Id)
-			}
-		}
-		if pgobj.xObjs == nil {
-			fmt.Println("-- no XObjects")
-		} else {
-			fmt.Println("-- XObject Ids:")
-			for i:=0; i< len(*pgobj.xObjs); i++ {
-				fmt.Printf("   %s %d\n", (*pgobj.xObjs)[i].Nam, (*pgobj.xObjs)[i].Id)
-			}
-		}
-		fmt.Println("**********************************************")
-
-}
-*/
-//rr
-
-func (pdf *ParsePdf) readLine(stPos int)(out []byte, nextPos int, err error) {
-
-	buf := *pdf.buf
-
-
-	maxPos := stPos + 3000
-	if len(buf) < maxPos {maxPos = len(buf)}
-//	if pdf.Dbg {fmt.Printf("\nreadLine [%d:%d]:\n%s\n***\n", stPos, maxPos, string(buf[stPos:maxPos]))}
-
-	endPos := -1
-	nextPos = -1
-	for i:=stPos; i < maxPos; i++ {
-//if pdf.Dbg {fmt.Printf("i: %d char: %q\n",i, buf[i])}
-		if buf[i] == '\n' {
-			endPos = i
-			if buf[i-1] == '\r' {endPos =i-1} 
-			nextPos = i+1
-			break
-		}
-	}
-
-	if endPos == -1 {endPos = maxPos}
-
-	out = buf[stPos:endPos]
-	return out, nextPos, nil
-}
-
-/*
-func (pdf *InfoPdf) GetPdfObjList(buf *[]byte)(objList *[]pdfObj, err error) {
-
-	fmt.Println("****************GetPdfObjList************")
-	bufLen := len(*buf)
-	fmt.Printf("GetPdfObjList: %d\n", bufLen)
-	fmt.Println("pdf Objects: ", pdf.numObj)
-	objList = pdf.objList
-	for i:= 1; i< pdf.numObj; i++ {
-		fmt.Printf("obj: %d start: %d end %d\n",i,(*objList)[i].start, (*objList)[i].end)
-	}
-	fmt.Println("****************GetPdfObjList************")
-
-	return objList, err
-}
-*/
-
-func getObjTypStr(ityp int)(s string) {
-	switch ityp {
-		case 1:
-			s = "Title"
-		case 2:
-			s = "Catalog"
-		case 3:
-			s = "Pages"
-		case 4:
-			s = "Page"
-		case 5:
-			s = "Font"
-		case 6:
-			s = "Font Desc"
-		case 7:
-			s = "Data"
-		case 8:
-			s= "ca"
-		default:
-			s= "unknown"
-	}
-	return s
-}
-
-/*
-func (pdf *InfoPdf) CreatePdfObj(pgNum int)(err error) {
-
-
-
-
-//	pdf.objList = &pdfObjList
-	return nil
-}
-
-
-func (pdf *InfoPdf) CreatePdf(pdfFilnam string)(err error) {
-
-	var outstr string
-	var pdfobj pdfObj
-	var pdfObjList []pdfObj
-
-
-	err = util.CheckFilnam(pdfFilnam, ".pdf")
-	if err != nil {return fmt.Errorf("no pdf extension %s: %v\n", pdfFilnam, err);}
-
-	pdfFil, err := os.Create(pdfFilnam)
-	if err != nil {return fmt.Errorf("could not create pdf File %s: %v\n", pdfFilnam, err);}
-	defer pdfFil.Close()
-
-	// write top two lines
-	tl := []byte("%pdf-1.4\n")
-	sl := []byte{37,130, 131, 132, 10}
-
-	bytSl := append(tl, sl...)
-	pdfFil.Write(bytSl)
-
-//	objSt := len(bytSl)
-
-
-	// write objects
-
-	var objSl []byte
-
-	// info
-	objStart, err := pdfFil.Seek(0, os.SEEK_END)
-	if err != nil {return fmt.Errorf("seek %v", err)}
-	objSt := int(objStart) + 1
-	objBegin := int(objStart)
-	objEnd := -1
-
-	pdf.numObj++
-	objStr := fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin := []byte(objStr)
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("<</Title (test)\n")
-	objSl = append(objSl, objLin...)
-	objLin = []byte("/Producer (azulPdf)>>\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-	objEnd = objBegin + len(objSl)
-//fmt.Printf("info: %d %d\n", objSt, objEnd)
-
-//	pdfobj.objId = pdf.numObj
-	pdfobj.start = objSt
-	pdfobj.end = objEnd
-	pdfObjList = append(pdfObjList, pdfobj)
-	pdf.infoId = pdf.numObj
-
-	// root
-	objSt = objEnd + 1
-	objEnd = -1
-
-	pdf.numObj++
-//	pdfobj.objId = pdf.numObj
-	pdf.rootId = pdf.numObj
-	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin = []byte(objStr)
-
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("<</Type /Catalog\n")
-	objSl = append(objSl, objLin...)
-
-	objStr = fmt.Sprintf("/Pages %d 0 R>>\n", pdf.numObj +1)
-	objLin = []byte(objStr)
-//	objLin = []byte("/Pages 3 0 R>>\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-//	pdfFil.Write(objSl)
-	objEnd = objBegin + len(objSl)
-//fmt.Printf("root: %d %d\n", objSt, objEnd)
-
-	pdfobj.start = int(objSt)
-	pdfobj.end = int(objEnd)
-	pdfObjList = append(pdfObjList, pdfobj)
-
-	// pages
-	objSt = objEnd + 1
-	objEnd = -1
-
-	pdf.numObj++
-//	pdfobj.objId = pdf.numObj
-	pdf.pagesId = pdf.numObj
-	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin = []byte(objStr)
-//	objLin = []byte("3 0 obj\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("<</Type /Pages\n")
-	objSl = append(objSl, objLin...)
-
-	// need to adjust for multiple pages
-
-	objStr = fmt.Sprintf("/Kids [%d 0 R]\n", pdf.numObj +1)
-	objLin = []byte(objStr)
-//	objLin = []byte("/Kids [4 0 R]\n")
-	objSl = append(objSl, objLin...)
-
-	pgCount := 1
-
-	objStr = fmt.Sprintf("/Count %d>>\n", pgCount)
-	objLin = []byte(objStr)
-//	objLin = []byte("/Count 1>>\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-	objEnd = objBegin + len(objSl)
-
-//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
-
-	pdfobj.start = int(objSt)
-	pdfobj.end = int(objEnd)
-	pdfObjList = append(pdfObjList, pdfobj)
-
-	// page
-	objSt = objEnd + 1
-	objEnd = -1
-
-	pdf.numObj++
-//	pdfobj.objId = pdf.numObj
-	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin = []byte(objStr)
-//	objLin = []byte("4 0 obj\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("<</Type /Page\n")
-	objSl = append(objSl, objLin...)
-
-	objStr = fmt.Sprintf("/Contents %d 0 R>>\n", pdf.numObj + 1)
-	objLin = []byte(objStr)
-//	objLin = []byte("/Contents 5 0 R>>\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-	objEnd = objBegin + len(objSl)
-
-//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
-
-	pdfobj.start = int(objSt)
-	pdfobj.end = int(objEnd)
-	pdfObjList = append(pdfObjList, pdfobj)
-
-	// Content
-	objSt = objEnd + 1
-	objEnd = -1
-
-	pdf.numObj++
-//	pdfobj.objId = pdf.numObj
-	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin = []byte(objStr)
-//	objLin = []byte("5 0 obj\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("<</Type /Contents\n")
-	objSl = append(objSl, objLin...)
-
-	streamLen := 99
-	str := fmt.Sprintf("/Length %d\n", streamLen)
-	objLin = []byte(str)
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("/Filter /FlateDecode>>\n")
-	objSl = append(objSl, objLin...)
-
-
-	objLin = []byte("stream\n")
-	objSl = append(objSl, objLin...)
-	// insert stream
-
-	objLin = []byte("endstream\n")
-	objSl = append(objSl, objLin...)
-
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-	objEnd = objBegin + len(objSl)
-
-//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
-
-	pdfobj.start = int(objSt)
-	pdfobj.end = int(objEnd)
-	pdfObjList = append(pdfObjList, pdfobj)
-
-
-// Font
-	objSt = objEnd + 1
-	objEnd = -1
-
-	pdf.numObj++
-//	pdfobj.objId = pdf.numObj
-	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin = []byte(objStr)
-//	objLin = []byte("4 0 obj\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("<</Type /Font\n")
-	objSl = append(objSl, objLin...)
-	objLin = []byte("/Subtype /TrueType\n")
-	objSl = append(objSl, objLin...)
-	objLin = []byte("/BaseFont /\"aaabbb + font\"\n")
-	objSl = append(objSl, objLin...)
-	objStr = fmt.Sprintf("/FontDescriptor %d 0 R>>\n", pdf.numObj + 1)
-	objLin = []byte(objStr)
-
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-	objEnd = objBegin + len(objSl)
-
-//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
-
-	pdfobj.start = int(objSt)
-	pdfobj.end = int(objEnd)
-	pdfObjList = append(pdfObjList, pdfobj)
-
-// Font Descriptor
-	objSt = objEnd + 1
-	objEnd = -1
-
-	pdf.numObj++
-//	pdfobj.objId = pdf.numObj
-	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin = []byte(objStr)
-	//	objLin = []byte("4 0 obj\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("<</Type /FontDescriptor\n")
-	objSl = append(objSl, objLin...)
-	objLin = []byte("/FontName /\"aaabbb + font\"\n")
-	objSl = append(objSl, objLin...)
-
-
-	objStr = fmt.Sprintf("/FontFile %d 0 R>>\n", pdf.numObj + 1)
-	objLin = []byte(objStr)
-
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-	objEnd = objBegin + len(objSl)
-
-//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
-
-	pdfobj.start = int(objSt)
-	pdfobj.end = int(objEnd)
-	pdfObjList = append(pdfObjList, pdfobj)
-
-	// FontFile
-	objSt = objEnd + 1
-	objEnd = -1
-
-	pdf.numObj++
-//	pdfobj.objId = pdf.numObj
-	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
-	objLin = []byte(objStr)
-	//	objLin = []byte("4 0 obj\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("stream\n")
-	objSl = append(objSl, objLin...)
-	// insert stream
-
-	objLin = []byte("endstream\n")
-	objSl = append(objSl, objLin...)
-
-	objLin = []byte("endobj\n")
-	objSl = append(objSl, objLin...)
-
-	objEnd = objBegin + len(objSl)
-
-//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
-
-	pdfobj.start = int(objSt)
-	pdfobj.end = int(objEnd)
-	pdfObjList = append(pdfObjList, pdfobj)
-
-	pdfFil.Write(objSl)
-
-	// write xref
-	xref, err := pdfFil.Seek(0, os.SEEK_END)
-	if err != nil {return fmt.Errorf("xref pos %v", err)}
-	pdf.xrefPos = int(xref)
-
-	pdfFil.WriteString("xref\n")
-	outstr = fmt.Sprintf("0 %d\n", pdf.numObj + 1)
-	pdfFil.WriteString(outstr)
-	outstr = fmt.Sprintf("0000000000 65535 f \n")
-	pdfFil.WriteString(outstr)
-
-	objSl = []byte{}
-	for i:=0; i<len(pdfObjList); i++ {
-		objLin = []byte("0000000000 00000 n \n")
-		str := fmt.Sprintf("%d",pdfObjList[i].start)
-//fmt.Printf("obj %d: %s\n", i, str)
-		pos := 10 -len(str)
-		for j:=0; j<len(str); j++ {
-			objLin[pos] = str[j]
-			pos++
-		}
-
-		objSl = append(objSl, objLin...)
-	}
-	pdfFil.Write(objSl)
-
-	// write trailer
-	pdfFil.WriteString("trailer\n")
-	outstr = fmt.Sprintf("<</Size %d\n", pdf.numObj)
-	pdfFil.WriteString(outstr)
-	outstr = fmt.Sprintf("/Root %d 0 R\n", pdf.rootId)
-	pdfFil.WriteString(outstr)
-	outstr = fmt.Sprintf("/Info %d 0 R>>\n", pdf.infoId)
-	pdfFil.WriteString(outstr)
-
-	// write last three lines
-	pdfFil.WriteString("startxref\n")
-	outstr = fmt.Sprintf("%d\n", pdf.xrefPos)
-	pdfFil.WriteString(outstr)
-	outstr = "%%EOF"
-	pdfFil.WriteString(outstr)
-	return nil
 }
 */
