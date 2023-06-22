@@ -4,7 +4,7 @@
 //
 // library pdf files in go
 // author: prr
-// date: 21 June 2023 
+// date: 21 June 2023
 // copyright 2023 prr azul software
 //
 
@@ -105,6 +105,8 @@ type dictVal struct {
 	valTyp int
 	valStr string
 }
+
+type objDict map[string]*dictVal
 
 type xrefObj struct {
 	bufPos int
@@ -459,6 +461,37 @@ func (pdf *ParsePdf) parseDblBracket(pSt int, pLen int)(bst int, bend int, err e
 	return bst, bend, nil
 }
 
+// method that parses dict
+func (pdf *ParsePdf) parseDict(dictBuf []byte)(out []byte, err error) {
+
+//	fmt.Printf("dbg start dblBr -- %d %d %s\n", pSt, pSt + pLen, string(dictBuf[pSt: pSt+pLen+1]))
+	bst := -1
+	for i:=0; i< len(dictBuf); i++ {
+		if dictBuf[i] == '<' {
+			if dictBuf[i+1] == '<' {
+				bst = i+2
+				break
+			}
+		}
+	}
+	if bst == -1 {return out, fmt.Errorf("no << found!")}
+
+	bend:= -1
+	for i:=len(dictBuf)-1; i>0; i-- {
+		if dictBuf[i] == '>' {
+			if dictBuf[i-1] == '>' {
+				bend = i-1
+				break
+			}
+		}
+	}
+
+	if bend == -1 {return out, fmt.Errorf("no >> found!")}
+//	fmt.Printf("dbg -- %d %d %s\n", bst, bend, string(dictBuf[bst:bend+1]))
+	out = dictBuf[bst:bend]
+	return out, nil
+}
+
 
 func (pdf *ParsePdf) parseTrailerDict(key string, dict []byte, Type int)(objId int, val int, err error) {
 
@@ -505,48 +538,6 @@ fmt.Printf("dbg -- parse Trailer: Key %s: value: %s\n", key, keyObjStr)
 	return objId, val, nil
 }
 
-/*
-func (pdf *InfoPdf) parseTrailCont(linStr string)(outstr string, err error) {
-
-	keyStr := string(linStr[1:5])
-	switch keyStr {
-	case "Size":
-		size:= 0
-		_, err = fmt.Sscanf(string(linStr[5:]),"%d",&size)
-		if err != nil {
-			outstr += fmt.Sprintf("Size: could not parse Size value: %v", err)
-			return outstr, fmt.Errorf("could not parse Size value: %v", err)
-		}
-		pdf.objSize = size
-		outstr += fmt.Sprintf("  Size: %d parsed correctly\n", size)
-
-	case "Info":
-		objId := 0
-		val := 0
-		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d R",&objId, &val)
-		if err != nil {
-			outstr += fmt.Sprintf("  Info: %s:: could not parse Info: %v", string(linStr[5:]), err)
-			return outstr, fmt.Errorf("Info: could not parse value: %v", err)
-		}
-		pdf.infoId = objId
-		outstr += fmt.Sprintf("  Info: objId: %d  ref: %d R parsed successfully\n", objId, val)
-	case "Root":
-		objId := 0
-		val := 0
-		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d R",&objId, &val)
-		if err != nil {
-			outstr += fmt.Sprintf("  Root: %s:: could not parse Info: %v", string(linStr[5:]), err)
-			return outstr, fmt.Errorf("Root: could not parse value: %v", err)
-		}
-		pdf.rootId = objId
-		outstr += fmt.Sprintf("  Root: objId: %d  ref: %d R parsed successfully\n", objId, val)
-
-	default:
-		outstr = fmt.Sprintf("%s is not a recognized keyword in Trailer\n", keyStr)
-		return outstr, fmt.Errorf("invalid key word: %s", keyStr)
-	}
-	return outstr, nil
-}
 
 /*
 func (pdf *InfoPdf) getKVStr(instr string)(outstr string, err error) {
@@ -919,13 +910,165 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 	pdf.PrintObjList()
 
 	// parse content
+//	buf := *pdf.buf
+	log.Printf("parsing object dict\n")
+	dictSlic := []byte{}
+//	for i:=1; i<pdf.NumObj; i++ {
+	for i:=6; i<8; i++ {
+		obj:= (*pdf.ObjList)[i]
+		if obj.stream {
+			dictSlic = buf[obj.BufPos:obj.streamSt]
+		} else {
+			dictSlic = buf[obj.BufPos:obj.EndPos]
+		}
+//	fmt.Printf("dbg -- obj[%d]: %s\n", i, string(dictSlic))
+		dictCont, err := pdf.parseDict(dictSlic)
+		if err != nil {return fmt.Errorf("parseDict Obj[%d]: %v", i, err)}
+	fmt.Printf("dbg -- obj[%d]: %s\n", i, string(dictCont))
+		dictObj, err := pdf.parseDictCont(dictCont)
+		if err != nil {return fmt.Errorf("parseDictCont Obj[%d]: %v", i, err)}
 
+
+	fmt.Printf("********* dbg -- obj[%d]: keys: %d\n", i, len(dictObj))
+		for k, v := range dictObj {
+			fmt.Printf("  key: %-15s val: %s Typ: %d\n",k, v.valStr, v.valTyp)
+		}
+	}
 
 	return nil
 }
 
 // method that parses a dictionary
-func (pdf *ParsePdf) parseDict(dict []byte)(dictMap map[string]string, err error) {
+func (pdf *ParsePdf) parseDictCont(dictObj []byte)(dictMap objDict, err error) {
+
+	// states
+	// 0: find key start
+	// 1: find key end
+	// 2: find val start
+	// 3: find value end
+	//	  reset to state to 0
+
+	state := 0
+	keySt := -1  //key start position
+	keyEnd := -1 //key end position
+	valSt := -1  //value start position
+	valEnd := -1 //value end position
+	objTyp := -1 // vslue type
+	dictNest := 0
+//xx
+	dictMap = make(map[string]*dictVal)
+
+	for i:=0; i< len(dictObj); i++ {
+		switch state {
+		case 0:
+			if dictObj[i] == '/' {
+				keySt = i+1
+				state = 1
+			}
+		case 1:
+			if dictObj[i] == ' ' {
+				keyEnd = i
+				valSt = i
+				state = 2
+				objTyp = 2
+				break
+			}
+			if dictObj[i] == '/' {
+				keyEnd = i
+				state = 2
+				valSt = i+1
+				objTyp = 1
+				break
+			}
+
+			if dictObj[i] == '[' {
+				keyEnd = i
+				state = 2
+				valSt = i
+				objTyp = 3
+				break
+			}
+
+			if dictObj[i] == '<' {
+				if dictObj[i+1] == '<' {
+					keyEnd = i
+					state = 4
+					valSt = i+2
+					objTyp = 4
+					dictNest++
+					break
+				}
+				return dictMap, fmt.Errorf("unviable dict val after key: %s", string(dictObj[keySt:keyEnd+1]))
+			}
+
+		case 2:
+			if dictObj[i] == '/' {
+				valEnd = i
+				keystr := string(dictObj[keySt:keyEnd])
+				valstr := string(dictObj[valSt:valEnd])
+//fmt.Printf("dbg -- key: %s val: %s Type: %d\n", keystr, valstr, objTyp)
+
+				dictMap[keystr] = &dictVal{
+					valTyp: objTyp,
+					valStr: valstr,
+				}
+
+				keySt = i+1
+				keyEnd = -1
+				valSt = -1
+				valEnd = -1
+				state = 1
+				break
+			}
+		// dict
+		case 4:
+			if dictObj[i] == '<' {
+				if dictObj[i+1] == '<' {
+					dictNest++
+				}
+			}
+			if dictObj[i] == '>' {
+				if dictObj[i+1] == '>' {
+					dictNest--
+				}
+			}
+			if dictNest == 0 {
+				valEnd = i
+				keystr := string(dictObj[keySt:keyEnd])
+				valstr := string(dictObj[valSt:valEnd])
+//fmt.Printf("dbg -- key: %s val: %s Type: %d\n", keystr, valstr, objTyp)
+
+				dictMap[keystr] = &dictVal{
+					valTyp: objTyp,
+					valStr: valstr,
+				}
+
+				keySt = i+1
+				keyEnd = -1
+				valSt = -1
+				valEnd = -1
+				state = 0
+				break
+			}
+
+		default:
+			return dictMap, fmt.Errorf("unviable state: %d", state)
+		}
+	}
+
+	if state == 2 {
+		valEnd = len(dictObj)
+		keystr := string(dictObj[keySt:keyEnd])
+		valstr := string(dictObj[valSt:valEnd])
+
+//fmt.Printf("dbg -- key: %s val: %s Type: %d\n", keystr, valstr, objTyp)
+
+		dictMap[keystr] = &dictVal{
+			valTyp: objTyp,
+			valStr: valstr,
+		}
+	}
+
 
 	return dictMap, nil
 }
