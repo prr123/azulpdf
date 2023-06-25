@@ -934,6 +934,37 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 			fmt.Printf("  key: %-15s val: %s Typ: %d\n",k, v.valStr, v.valTyp)
 		}
 
+		err = pdf.parseKeyType(dictObj)
+		if err != nil {return fmt.Errorf("parseDictMap Obj[%d]: %v", i, err)}
+
+	}
+
+	return nil
+}
+
+// method that parses the type key
+func (pdf *ParsePdf) parseKeyType(dictMap objDict)(typInt int, err error) {
+
+	typVal, ok := dictMap("Type")
+	if !ok { return nil}
+
+	switch typVal {
+	case "Catalog":
+
+
+	case "Page":
+
+
+	case "Pages":
+
+
+	case "Font":
+
+
+	case "FontDescriptor":
+
+	default:
+
 	}
 
 	return nil
