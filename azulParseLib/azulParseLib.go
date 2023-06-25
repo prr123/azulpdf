@@ -913,8 +913,8 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 //	buf := *pdf.buf
 	log.Printf("parsing object dict\n")
 	dictSlic := []byte{}
-//	for i:=1; i<pdf.NumObj; i++ {
-	for i:=6; i<8; i++ {
+	for i:=1; i<pdf.NumObj; i++ {
+//	for i:=6; i<8; i++ {
 		obj:= (*pdf.ObjList)[i]
 		if obj.stream {
 			dictSlic = buf[obj.BufPos:obj.streamSt]
@@ -925,14 +925,15 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 		dictCont, err := pdf.parseDict(dictSlic)
 		if err != nil {return fmt.Errorf("parseDict Obj[%d]: %v", i, err)}
 	fmt.Printf("dbg -- obj[%d]: %s\n", i, string(dictCont))
+
 		dictObj, err := pdf.parseDictCont(dictCont)
 		if err != nil {return fmt.Errorf("parseDictCont Obj[%d]: %v", i, err)}
-
 
 	fmt.Printf("********* dbg -- obj[%d]: keys: %d\n", i, len(dictObj))
 		for k, v := range dictObj {
 			fmt.Printf("  key: %-15s val: %s Typ: %d\n",k, v.valStr, v.valTyp)
 		}
+
 	}
 
 	return nil
@@ -955,6 +956,8 @@ func (pdf *ParsePdf) parseDictCont(dictObj []byte)(dictMap objDict, err error) {
 	valEnd := -1 //value end position
 	objTyp := -1 // vslue type
 	dictNest := 0
+	arrayNest :=0
+	roundNest := 0
 //xx
 	dictMap = make(map[string]*dictVal)
 
@@ -982,10 +985,21 @@ func (pdf *ParsePdf) parseDictCont(dictObj []byte)(dictMap objDict, err error) {
 			}
 
 			if dictObj[i] == '[' {
+//				keySt = i+1
 				keyEnd = i
-				state = 2
+				state = 5
 				valSt = i
-				objTyp = 3
+				objTyp = 5
+				arrayNest++
+				break
+			}
+			if dictObj[i] == '(' {
+//				keySt = i+1
+				keyEnd = i
+				state = 6
+				valSt = i
+				objTyp = 6
+				roundNest++
 				break
 			}
 
@@ -1043,12 +1057,55 @@ func (pdf *ParsePdf) parseDictCont(dictObj []byte)(dictMap objDict, err error) {
 					valStr: valstr,
 				}
 
-				keySt = i+1
+				keySt = -1
 				keyEnd = -1
 				valSt = -1
 				valEnd = -1
 				state = 0
-				break
+			}
+
+		case 5:
+			if dictObj[i] == '[' {
+					arrayNest++
+				}
+			if dictObj[i] == ']' {
+					arrayNest--
+				}
+
+			if arrayNest == 0 {
+				valEnd = i
+				keystr := string(dictObj[keySt:keyEnd])
+				valstr := string(dictObj[valSt+1:valEnd])
+				dictMap[keystr] = &dictVal{
+					valTyp: objTyp,
+					valStr: valstr,
+				}
+				state = 0
+				keySt = -1
+				keyEnd = -1
+				valSt = -1
+				valEnd = -1
+				state = 0
+			}
+		case 6:
+			if dictObj[i] == ')' {
+					roundNest--
+				}
+
+			if roundNest == 0 {
+				valEnd = i
+				keystr := string(dictObj[keySt:keyEnd])
+				valstr := string(dictObj[valSt+1:valEnd])
+				dictMap[keystr] = &dictVal{
+					valTyp: objTyp,
+					valStr: valstr,
+				}
+				state = 0
+				keySt = -1
+				keyEnd = -1
+				valSt = -1
+				valEnd = -1
+				state = 0
 			}
 
 		default:
