@@ -60,6 +60,7 @@ type ParsePdf struct {
 	PagesId int
 	xrefPos int
 	StartXrefPos int `yaml:"startxref"`
+	Linear bool
 //	trailerPos int
 //	xrefPos2 int
 //	startXrefPos2 int
@@ -187,6 +188,7 @@ func InitPdfParseLib(pdfFilnam string)(info *ParsePdf, err error) {
 	pdf := ParsePdf{
 		PdfFilnam: pdfFilnam,
 		Dbg: true,
+		Linear: false,
 	}
     pdfFil, err := os.Open(pdfFilnam)
     if err != nil {
@@ -904,6 +906,7 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 	docLin, ok := fObjDict["Linearized"]
 	if ok {
 		fmt.Printf("doc linearized: %s\n", docLin.valStr)
+		pdf.Linear = true
 	}
 
 	// create a list of objects
@@ -2402,6 +2405,7 @@ func (pdf *ParsePdf) PrintPdfDocStruct() {
 	fmt.Printf("Trailers: %d\n", pdf.NumTrailer)
 	fmt.Printf("root obj: %d\n", pdf.RootId)
 	fmt.Printf("pages obj: %d\n", pdf.PagesId)
+	fmt.Printf("Linearized: %t\n", pdf.Linear)
 
 	fmt.Printf("****** obj list *******\n")
 	for i:=1; i< pdf.NumObj; i++ {
