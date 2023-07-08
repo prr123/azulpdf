@@ -54,7 +54,7 @@ type ParsePdf struct {
 //	objSize int
 	NumTrailer int `yaml:"numTrailer"`
 	NumObj int `yaml:"numObj"`
-	PageCount int `yaml:"pages:"`
+	NumPages int `yaml:"pages:"`
 	InfoId int
 	RootId int
 	PagesId int
@@ -66,15 +66,15 @@ type ParsePdf struct {
 //	startXrefPos2 int
 //	trailerPos2 int
 //	objStart int
-	PageObjList *[]int
-	FontObjList *[]int
+//	PageObjList *[]int
+//	FontObjList *[]int
 //	fCount int
 //	gStateIds *[]int
 //	gCount int
 //	xObjIds *[]int
 //	xObjCount int
 //	xrefList *[]xrefObj
-//	pageList *[]pgObj
+	PageList *[]pgObj
 //	objList *[]pdfObj
 	ObjList *[]pdfObj
 //	fontList *[]fontObj
@@ -118,13 +118,13 @@ type xrefObj struct {
 }
 
 type pgObj struct {
-	id int
-	pageNum int
+	Id int
+//	pageNum int
 	mediabox *[4]float32
 	contentId int
 	parentId int
-	fontId int
-	gStateId int
+//	fontId int
+//	gStateId int
 	xObjId int
 	fonts *[]objRef
 	gStates *[]objRef
@@ -956,6 +956,8 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 		}
 	}
 
+	err = pdf.parsePages()
+	if err != nil {return fmt.Errorf("parsePages: %v", err)}
 	pdf.PrintObjList()
 
 	return nil
@@ -1462,51 +1464,43 @@ fmt.Printf("key: %s val: %d\n", key, robjId)
 	return nil
 }
 */
-/*
-func (pdf *InfoPdf) parsePages()(err error) {
 
-	if pdf.pagesId > pdf.numObj {return fmt.Errorf("invalid pagesId!")}
-	if pdf.pagesId ==0 {return fmt.Errorf("pagesId is 0!")}
+func (pdf *ParsePdf) parsePages()(err error) {
 
-	obj := (*pdf.objList)[pdf.pagesId]
+	if pdf.PagesId > pdf.NumObj || pdf.PagesId < 1 {return fmt.Errorf("invalid pagesId: %d!", pdf.PagesId)}
 
-//fmt.Printf("pages:\n%s\n", string(buf[obj.start: obj.end]))
+	obj := (*pdf.ObjList)[pdf.PagesId]
 
-	err = pdf.parseKids(obj)
-	if err!= nil {return fmt.Errorf("parseKids: %v", err)}
-
-	if pdf.verb {
-		fmt.Printf("pages: pageCount: %d\n", pdf.pageCount)
-		for i:=0; i< pdf.pageCount; i++ {
-			fmt.Printf("page: %d objId: %d\n", i+1, (*pdf.pageIds)[i])
-		}
-	}
-	pageList := make([]pgObj, pdf.pageCount)
-
-	mbox, err := pdf.parseMbox(obj)
-	if err!= nil {
-		pdf.txtFil.WriteString("no Name \"/MediaBox\" found!\n")
-		fmt.Println("no Name \"/MediaBox\" found!")
-	}
-	pdf.mediabox = mbox
-
-	reslist, err := pdf.parseResources(obj)
-	if err!= nil {
-		pdf.txtFil.WriteString("no Name \"/Resources\" found!\n")
-		fmt.Println("no Name \"/Resources\" found!")
+	pagesDict := obj.dictMap
+	fmt.Println("******* Parse Pages Dict ************\n")
+	for k,v := range *pagesDict {
+		fmt.Printf("key: %s value: %s\n", k, v.valStr)
 	}
 
-//fmt.Printf("resList: %v\n", reslist)
+	valObj, ok := (*pagesDict)["Count"]
+	if !ok {return fmt.Errorf("no page count!")}
+	pgnum, err := strconv.Atoi(valObj.valStr)
+	if err != nil {return fmt.Errorf("page count conversion: %v", err)}
 
-	if reslist != nil {
-		if reslist.fonts != nil {pdf.fonts = reslist.fonts}
-		if reslist.gStates != nil {pdf.gStates = reslist.gStates}
-		if reslist.xObjs != nil {pdf.gStates = reslist.xObjs}
+	pdf.NumPages = pgnum
+
+	kidsObj, ok := (*pagesDict)["Kids"]
+	if !ok {return fmt.Errorf("no pages!")}
+
+	fmt.Printf("dbg -- kids: %s\n", kidsObj.valStr)
+
+	pgList := make([]pgObj, pgnum)
+
+	kids := []int{99}
+
+	for pg:=0; pg< pgnum; pg++ {
+		pgList[pg].Id = kids[pg]
 	}
-	pdf.pageList = &pageList
+
+	pdf.PageList = &pgList
 	return nil
 }
-*/
+
 
 /*
 func (pdf *InfoPdf) parseResources(obj pdfObj)(resList *resourceList, err error) {
@@ -2414,8 +2408,16 @@ func (pdf *ParsePdf) PrintPdfDocStruct() {
 	}
 	fmt.Printf("**** end obj list *****\n")
 
+
+	fmt.Printf("Page Count: %3d\n", pdf.NumPages)
+
+	for pg:=0; pg< pdf.NumPages; pg++ {
+		pgObj := (*pdf.PageList)[pg]
+		fmt.Printf("  ****** Page[%d] ********\n", pg+1)
+		fmt.Printf("  Obj Id: %d\n", pgObj.Id)
+		fmt.Printf("  ****** end Page ********\n")
+	}
 /*
-	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
 	if pdf.mediabox == nil {
 		fmt.Printf("no MediaBox\n")
 	} else {
