@@ -63,8 +63,8 @@ type ParsePdf struct {
 //	startXrefPos2 int
 //	trailerPos2 int
 //	objStart int
-//	pageIds *[]int
-//	fontIds *[]int
+	PageObjList *[]int
+	FontObjList *[]int
 //	fCount int
 //	gStateIds *[]int
 //	gCount int
@@ -90,8 +90,8 @@ type pdfObj struct {
 	EndPos int
 	objId int
 	objTyp int
-	typstr string
-	dictMap map[string]dictVal
+	objTypStr string
+	dictMap *objDict
 	dict bool
 	array bool
 	simple bool
@@ -217,7 +217,7 @@ func InitPdfParseLib(pdfFilnam string)(info *ParsePdf, err error) {
 	return &pdf, nil
 }
 
-func (pdf *ParsePdf) Save(filnam string)(err error) {
+func (pdf *ParsePdf) SavePdf (filnam string)(err error) {
 
 	return nil
 }
@@ -734,16 +734,6 @@ func (pdf *ParsePdf) parseXref(stPos int)(trailStartPos int, err error) {
 	return nextPos, nil
 }
 
-func (pdf *ParsePdf) PrintObjList (){
-
-	fmt.Printf("dbg: **** objlist[%d] ******\n", pdf.NumObj)
-	fmt.Printf("obj start end id  objType\n")
-    for i := 0; i< pdf.NumObj; i++ {
-		obj := (*pdf.ObjList)[i]
-		fmt.Printf("%d: %d %d %d %d %t %d %d\n", i, obj.BufPos, obj.EndPos, obj.objId, obj.objTyp, obj.stream, obj.streamSt, obj.streamEnd)
-	}
-
-}
 /*
 func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err error) {
 
@@ -894,6 +884,7 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 		if err != nil {return fmt.Errorf("parseTrailer: %v", err)}
 	}
 
+	// peek ahead to see whether doc is linearized
 	firstObjSt, firstObjEnd, err := pdf.findNextObj(10)
 	if err != nil {return fmt.Errorf("findNextObj: %v", err)}
 
@@ -904,17 +895,17 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 
 	log.Printf("bracket[%d:%d]: %s\n", dblStart, dblEnd,string(buf[dblStart:dblEnd+1]))
 
+	// create a list of objects
 	err = pdf.parseObjList()
 	if err != nil {return fmt.Errorf("parseObjList: %v", err)}
 
-	pdf.PrintObjList()
 
-	// parse content
-//	buf := *pdf.buf
+	// loop through the object list and create a dict obj for each pdf object
 	log.Printf("parsing object dict\n")
 	dictSlic := []byte{}
 	for i:=1; i<pdf.NumObj; i++ {
-//	for i:=6; i<8; i++ {
+
+		// get the dict slice for each object
 		obj:= (*pdf.ObjList)[i]
 		if obj.stream {
 			dictSlic = buf[obj.BufPos:obj.streamSt]
@@ -922,6 +913,8 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 			dictSlic = buf[obj.BufPos:obj.EndPos]
 		}
 //	fmt.Printf("dbg -- obj[%d]: %s\n", i, string(dictSlic))
+		
+		// parse the dictSlice
 		dictCont, err := pdf.parseDict(dictSlic)
 		if err != nil {return fmt.Errorf("parseDict Obj[%d]: %v", i, err)}
 	fmt.Printf("dbg -- obj[%d]: %s\n", i, string(dictCont))
@@ -929,34 +922,43 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 		dictObj, err := pdf.parseDictCont(dictCont)
 		if err != nil {return fmt.Errorf("parseDictCont Obj[%d]: %v", i, err)}
 
-	fmt.Printf("********* dbg -- obj[%d]: keys: %d\n", i, len(dictObj))
+		(*pdf.ObjList)[i].dictMap = &dictObj
+
+		fmt.Printf("********* dbg -- obj[%d]: keys: %d\n", i, len(dictObj))
 		for k, v := range dictObj {
 			fmt.Printf("  key: %-15s val: %s Typ: %d\n",k, v.valStr, v.valTyp)
 		}
 
-		err = pdf.parseKeyType(dictObj)
-		if err != nil {return fmt.Errorf("parseDictMap Obj[%d]: %v", i, err)}
+		// check whether dictMap contants the key Type
+		keyVal, ok := dictObj["Type"]
+		if ok {
+			fmt.Printf("Obj[%d]: %d %s\n", i, keyVal.valTyp, keyVal.valStr)
+			(*pdf.ObjList)[i].objTyp = keyVal.valTyp
+			(*pdf.ObjList)[i].objTypStr = keyVal.valStr
+		}
 
+//		keyValStr, err := pdf.parseKeyType(i, )
+//		if err != nil {return fmt.Errorf("parseDictMap Obj[%d]: %v", i, err)}
 	}
+
+	pdf.PrintObjList()
 
 	return nil
 }
 
+
 // method that parses the type key
-func (pdf *ParsePdf) parseKeyType(dictMap objDict)(typInt int, err error) {
+func (pdf *ParsePdf) parseKeyType(i int, valstr string)(err error) {
 
-	typVal, ok := dictMap("Type")
-	if !ok { return nil}
-
-	switch typVal {
+	switch valstr {
 	case "Catalog":
-
+		pdf.RootId = i
 
 	case "Page":
 
 
 	case "Pages":
-
+		pdf.PagesId = i
 
 	case "Font":
 
@@ -2205,8 +2207,8 @@ func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
 }
 */
 
+// method that parses an object to determine dict start/end stream start/end and object type
 func (pdf *ParsePdf) parseObjList()(err error) {
-// method parses an object to determine dict start/end stream start/end and object type
 
 	for i:= 1; i< pdf.NumObj; i++ {
 		err = pdf.parseObj(i)
@@ -2373,16 +2375,26 @@ func (pdf *InfoPdf) PrintPage (iPage int) {
 }
 */
 
-/*
-func (pdf *InfoPdf) PrintPdf() {
+
+func (pdf *ParsePdf) PrintPdfDocStruct() {
 
 	fmt.Println("\n******************** Info Pdf **********************\n")
-	fmt.Printf("File Name: %s\n", pdf.filNam)
-	fmt.Printf("File Size: %d\n", pdf.filSize)
+	fmt.Printf("File Name: %s\n", pdf.PdfFilnam)
+//	fmt.Printf("File Size: %d\n", pdf.filSize)
 	fmt.Println()
 
-	fmt.Printf("pdf version: major %d minor %d\n",pdf.majver, pdf.minver)
+	fmt.Printf("pdf version: %d.%d\n",pdf.Majver, pdf.Minver)
 
+	fmt.Printf("obj count: %d\n", pdf.NumObj -1 )
+
+	fmt.Printf("****** obj list *******\n")
+	for i:=1; i< pdf.NumObj; i++ {
+		obj := (*pdf.ObjList)[i]
+		fmt.Printf("  obj[%d] Id: %d Typ: %d TypStr: %s\n", i, obj.objId, obj.objTyp, obj.objTypStr)
+	}
+	fmt.Printf("**** end obj list *****\n")
+
+/*
 	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
 	if pdf.mediabox == nil {
 		fmt.Printf("no MediaBox\n")
@@ -2480,7 +2492,23 @@ func (pdf *InfoPdf) PrintPdf() {
 				fmt.Printf("   %s %d\n", (*pdf.fonts)[i].Nam, (*pdf.fonts)[i].Id)
 		}
 	}
-
+*/
 	return
 }
-*/
+
+func (pdf *ParsePdf) PrintObjList (){
+
+	fmt.Printf("dbg: **** objlist[%d] ******\n", pdf.NumObj)
+	fmt.Printf("obj start end id  objType\n")
+    for i := 0; i< pdf.NumObj; i++ {
+		obj := (*pdf.ObjList)[i]
+		fmt.Printf("%d: %d %d %d %d %t %d %d\n", i, obj.BufPos, obj.EndPos, obj.objId, obj.objTyp, obj.stream, obj.streamSt, obj.streamEnd)
+	}
+	fmt.Printf("dbg: **** end objlist 1 ******\n")
+	fmt.Printf("*** obj id type ***\n")
+    for i := 0; i< pdf.NumObj; i++ {
+		obj := (*pdf.ObjList)[i]
+		fmt.Printf("%d: %d %d %s\n", i, obj.objId, obj.objTyp, obj.objTypStr)
+	}
+	fmt.Printf("dbg: **** end objlist ******\n")
+}
