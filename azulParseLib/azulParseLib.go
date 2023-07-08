@@ -947,10 +947,10 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 			fmt.Printf("Obj[%d]: %d %s\n", i, keyVal.valTyp, keyVal.valStr)
 			(*pdf.ObjList)[i].objTyp = keyVal.valTyp
 			(*pdf.ObjList)[i].objTypStr = keyVal.valStr
-		}
 
-//		keyValStr, err := pdf.parseKeyType(i, )
-//		if err != nil {return fmt.Errorf("parseDictMap Obj[%d]: %v", i, err)}
+			err = pdf.parseKeyType(i, keyVal.valStr)
+			if err != nil {return fmt.Errorf("parseKeyType Obj[%d]: %v", i, err)}
+		}
 	}
 
 	pdf.PrintObjList()
@@ -2398,6 +2398,10 @@ func (pdf *ParsePdf) PrintPdfDocStruct() {
 	fmt.Printf("pdf version: %d.%d\n",pdf.Majver, pdf.Minver)
 
 	fmt.Printf("obj count: %d\n", pdf.NumObj -1 )
+
+	fmt.Printf("Trailers: %d\n", pdf.NumTrailer)
+	fmt.Printf("root obj: %d\n", pdf.RootId)
+	fmt.Printf("pages obj: %d\n", pdf.PagesId)
 
 	fmt.Printf("****** obj list *******\n")
 	for i:=1; i< pdf.NumObj; i++ {
