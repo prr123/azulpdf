@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"bytes"
+	"strconv"
 //	"strings"
 //	"io"
 //	"compress/zlib"
@@ -51,6 +52,7 @@ type ParsePdf struct {
 //	filSize int64
 //	filNam string
 //	objSize int
+	NumTrailer int `yaml:"numTrailer"`
 	NumObj int `yaml:"numObj"`
 	PageCount int `yaml:"pages:"`
 	InfoId int
@@ -377,53 +379,43 @@ func (pdf *ParsePdf) findNextObj(start int)(objSt, objEnd int, err error) {
 }
 
 // method parses trailer
-func (pdf *ParsePdf) parseTrailer(stPos int, keyParse bool)(err error) {
+func (pdf *ParsePdf) parseTrailer(stPos int)(prev int, err error) {
 
-	if pdf.StartXrefPos < 1 {return fmt.Errorf("no valid startxref")}
-//	if pdf.trailerPos < 1 {return fmt.Errorf("no valid trailer")}
+	prev = -1
+	if pdf.StartXrefPos < 1 {return -1, fmt.Errorf("no valid startxref")}
 
-//	if stPos < pdf.StartXrefPos {return fmt.Errorf("not a viable stPos")}
-
-	buf := *pdf.buf
 	// find trailer keyword in first line
 	txtslic, nextPos, err := pdf.readLine(stPos)
-	if err != nil {return fmt.Errorf("trailer first line no eol")}
+	if err != nil {return -1, fmt.Errorf("trailer first line no eol")}
 
 	tidx:= bytes.Index(txtslic, []byte("trailer"))
-	if tidx == -1 {return fmt.Errorf("key word trailer not found!")}
+	if tidx == -1 {return -1, fmt.Errorf("key word trailer not found!")}
 
 	// get trailer dict  line
 
 	txtslic, _, err = pdf.readLine(nextPos)
-//	if pdf.Dbg {fmt.Printf("dbg -- trailer dict[%d]: %s\n", len(txtslic), string(txtslic))}
-//	fmt.Printf("dbg -- nextPos [%d: %d] %s\n", nextPos, nextPos + len(txtslic)+1, string(buf[nextPos:nextPos + len(txtslic) + 1]))
-	dblStart, dblEnd, err := pdf.parseDblBracket(nextPos, len(txtslic))
-	if err != nil {return fmt.Errorf("parseDblBracket: %v",err)}
-//	fmt.Printf("dbg -- dblStart: %d, dblEnd: %d\n", dblStart, dblEnd)
 
-	trailerDict := buf[dblStart:dblEnd +1]
-//	if pdf.Dbg {fmt.Printf("trailer dict: %s\n", string(trailerDict))}
+	dictCont, err := pdf.parseDict(txtslic)
+	if err != nil {return -1, fmt.Errorf("parseDict trailer: %v", err)}
 
-	if !keyParse { return nil}
+	fmt.Printf("dbg -- trailer: %s\n", string(dictCont))
 
-	objId, _, err := pdf.parseTrailerDict("Root",trailerDict, 1)
-	if err != nil {return fmt.Errorf("parse Root Obj error: %v!", err)}
-	pdf.RootId = objId
+	trailerDict, err := pdf.parseDictCont(dictCont)
+	if err != nil {return -1, fmt.Errorf("parseDictCont: %v", err)}
 
-	objId, _, err = pdf.parseTrailerDict("Info",trailerDict, 1)
-	if err != nil {return fmt.Errorf("parse Info Obj: %v!", err)}
-	pdf.InfoId = objId
-
-	numObj, _, err := pdf.parseTrailerDict("Size",trailerDict, 2)
-	if err != nil {return fmt.Errorf("parse Size Obj: %v!", err)}
-	if pdf.NumObj != numObj { return fmt.Errorf("pdf.NumObj %d != numObj %d\n", pdf.NumObj, numObj)}
-
-	if pdf.xrefPos < 0 {
-		xrefpos, _, err := pdf.parseTrailerDict("Prev", trailerDict, 2)
-		if err != nil {return fmt.Errorf("parse Prev Obj: %v!", err)}
-		pdf.xrefPos = xrefpos
+	fmt.Println("trailerDict:")
+	for k,v := range trailerDict {
+		fmt.Printf("key: %s val: %s\n", k, v.valStr)
 	}
-	return nil
+	xrefObj, ok:= trailerDict["Prev"]
+	if ok {
+//		fmt.Printf("xrefObj: %v\n", xrefObj)
+		pos, err := strconv.Atoi(xrefObj.valStr)
+		if err != nil {return -1, fmt.Errorf("Atoi: Key Prev has no int value", err)}
+		prev = pos
+	}
+
+	return prev, nil
 }
 
 
@@ -851,7 +843,7 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 	buf:= *pdf.buf
 	err = pdf.parseTopTwoLines()
 	if err != nil {return fmt.Errorf("parseTopTwoLines: %v", err)}
-	log.Printf("parsed top two lines!\n")
+	log.Printf("success parsing top two lines!\n")
 //fmt.Printf("**** first two lines ***\n%s\n",outstr)
 
 	// last 3 lines:
@@ -862,27 +854,29 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 	if err != nil {return fmt.Errorf("parseLast3Lines: %v", err)}
 	log.Printf("parsed last3Line xref: %d\n", xrefPos)
 
-	log.Printf("startXrefPos: %d |%s\n", xrefPos, string(buf[xrefPos: xrefPos + 4]))
+	log.Printf("startXrefPos: %d\n", xrefPos)
 
-	trailPos, err := pdf.parseXref(xrefPos)
-	if err != nil {return fmt.Errorf("parseXref: %v", err)}
+	// parse xref tables and trailers
+	numXref := 1
 
-	log.Printf("trailer start Pos: %d\n", trailPos)
+	for i:=0; i< numXref; i++ {
 
-	err = pdf.parseTrailer(trailPos, true)
-	if err != nil {return fmt.Errorf("parseTrailer: %v", err)}
-
-	if pdf.xrefPos > 0 {
-
-		trailPos, err := pdf.parseXref(pdf.xrefPos)
+		trailPos, err := pdf.parseXref(xrefPos)
 		if err != nil {return fmt.Errorf("parseXref: %v", err)}
 
 		log.Printf("trailer start Pos: %d\n", trailPos)
-		pdf.xrefPos = 0
 
-		err = pdf.parseTrailer(trailPos, false)
+		xrefPos, err = pdf.parseTrailer(trailPos)
 		if err != nil {return fmt.Errorf("parseTrailer: %v", err)}
+
+		if xrefPos == -1 { break}
+
+		numXref++
+		log.Printf("xrefpos[%d]: %d\n", numXref, xrefPos)
 	}
+
+	log.Printf("trailers: %d\n", numXref)
+	pdf.NumTrailer = numXref
 
 	// peek ahead to see whether doc is linearized
 	firstObjSt, firstObjEnd, err := pdf.findNextObj(10)
@@ -895,7 +889,25 @@ func (pdf *ParsePdf) ParsePdfDoc()(err error) {
 
 	log.Printf("bracket[%d:%d]: %s\n", dblStart, dblEnd,string(buf[dblStart:dblEnd+1]))
 
+		fObjCont, err := pdf.parseDict(buf[firstObjSt:firstObjEnd])
+		if err != nil {return fmt.Errorf("parseDict first Obj: %v", err)}
+	fmt.Printf("dbg -- first obj: %s\n", string(fObjCont))
+
+		fObjDict, err := pdf.parseDictCont(fObjCont)
+		if err != nil {return fmt.Errorf("parseDictCont first Obj: %v", err)}
+
+		fmt.Printf("********* dbg -- first obj keys: %d\n", len(fObjDict))
+		for k, v := range fObjDict {
+			fmt.Printf("  key: %-15s val: %s Typ: %d\n",k, v.valStr, v.valTyp)
+		}
+
+	docLin, ok := fObjDict["Linearized"]
+	if ok {
+		fmt.Printf("doc linearized: %s\n", docLin.valStr)
+	}
+
 	// create a list of objects
+	log.Printf("****** parsing object list *****\n")
 	err = pdf.parseObjList()
 	if err != nil {return fmt.Errorf("parseObjList: %v", err)}
 
@@ -1004,7 +1016,7 @@ func (pdf *ParsePdf) parseDictCont(dictObj []byte)(dictMap objDict, err error) {
 		case 1:
 			if dictObj[i] == ' ' {
 				keyEnd = i
-				valSt = i
+				valSt = i+1
 				state = 2
 				objTyp = 2
 				break
