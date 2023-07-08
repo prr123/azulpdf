@@ -1,7 +1,7 @@
 // program to analyse pdf files in go
 // author: prr
 // date 29/2/2022
-// copyright 2022 prr azul software
+// copyright 2022, 2023 prr azul software
 //
 
 package main
@@ -50,12 +50,15 @@ log.Printf("out file: %s\n",outFilnamStr)
 //	err = pdf.ReadPdf(parseFilnam)
 //	if err != nil {fmt.Printf("error ReadPdf file: %s! %v\n", parseFilnam, err); os.Exit(-1);}
 
-	err = pdf.ParsePdf()
+	err = pdf.ParsePdfDoc()
 	if err != nil {log.Fatalf("ParsePdf: %v\n", err)}
 
 	log.Printf("parsePdf successful!\n")
 
-	pdf.Save(outFilnamStr)
+	pdf.PrintPdfDocStruct()
+
+	err = pdf.SavePdf(outFilnamStr)
+	if err != nil {log.Fatalf("Save: %v\n", err)}
 
 	log.Println("success ParsePdf!")
 }
